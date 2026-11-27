@@ -209,11 +209,8 @@ export const startLocalServer = async (id: string, serverData: any) => {
   // otherwise the seed runs forever and the user's app never starts.
   const isSeedContent = async (filePath: string, marker: string) => {
     try {
-      const fd = await fs.open(filePath, "r");
-      const buf = Buffer.alloc(300);
-      const { bytesRead } = await fd.read(buf, 0, 300, 0);
-      await fd.close();
-      return buf.toString("utf8", 0, bytesRead).includes(marker);
+      const content = await fs.readFile(filePath, "utf8");
+      return content.slice(0, 300).includes(marker);
     } catch (e) { return false; }
   };
   const pickEntry = async (candidates: string[], seedFile: string, marker: string) => {
