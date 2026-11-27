@@ -309,7 +309,7 @@ export const getVersions = async (type: string = "PAPER") => {
   if (normalizedType === "PAPER") {
     try {
       const vRes = await axios.get("https://fill.papermc.io/v3/projects/paper", {
-        headers: { "User-Agent": "SYED-Panel/2.0" },
+        headers: { "User-Agent": "Syed-Panel/2.0" },
         timeout: 4000
       });
       if (vRes.data?.versions) {

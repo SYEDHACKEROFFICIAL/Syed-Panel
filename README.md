@@ -24,7 +24,7 @@ Menu Options:
 1. Clone the repository:
    ```bash
    git clone https://github.com/SYEDHACKEROFFICIAL/Syed-Panel.git
-   cd SYED-Panel
+   cd Syed-Panel
    ```
 
 2. Install dependencies:

@@ -1383,7 +1383,7 @@ const downloadFileSafely = async (downloadUrl: string, targetDir: string, filena
       responseType: "stream",
       timeout: 60000,
       headers: {
-        "User-Agent": "SYED-Panel/1.0 (Minecraft Server Manager)"
+        "User-Agent": "Syed-Panel/1.0 (Minecraft Server Manager)"
       }
     });
 
@@ -1432,7 +1432,7 @@ const resolveModrinthVersionAndFile = async (
   // 2. If a specific version was chosen by the user
   if (specificVersionId) {
     const vRes = await axios.get(`https://api.modrinth.com/v2/version/${specificVersionId}`, {
-      headers: { "User-Agent": "SYED-Panel/1.0" }
+      headers: { "User-Agent": "Syed-Panel/1.0" }
     });
     if (vRes.data && vRes.data.files && vRes.data.files.length > 0) {
       const file = vRes.data.files.find((f: any) => f.primary) ||
@@ -1458,7 +1458,7 @@ const resolveModrinthVersionAndFile = async (
   }
 
   const verRes = await axios.get(`https://api.modrinth.com/v2/project/${projectId}/version`, {
-    headers: { "User-Agent": "SYED-Panel/1.0" }
+    headers: { "User-Agent": "Syed-Panel/1.0" }
   });
 
   const versions = verRes.data;
@@ -1771,7 +1771,7 @@ export const getModrinthProjectVersions = async (req: Request, res: Response) =>
 
   try {
     const resp = await axios.get(`https://api.modrinth.com/v2/project/${projectId}/version`, {
-      headers: { "User-Agent": "SYED-Panel/1.0" },
+      headers: { "User-Agent": "Syed-Panel/1.0" },
       timeout: 15000
     });
     res.json(resp.data);

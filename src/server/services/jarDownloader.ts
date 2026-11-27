@@ -137,7 +137,7 @@ export const downloadJar = async (type: string, version: string, destPath: strin
     // Default: Paper server (with Purpur & Spigot high-speed fallback mirrors)
     try {
       const paperApiHeaders = {
-        "User-Agent": "SYED-Panel/2.0 (https://github.com/syed-panel; admin@syedpanel.internal)",
+        "User-Agent": "Syed-Panel/2.0 (https://github.com/syed-panel; admin@syedpanel.internal)",
         "Accept": "application/json"
       };
 

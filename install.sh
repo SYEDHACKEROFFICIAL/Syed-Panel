@@ -30,7 +30,7 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # Ensure initial tools exist if cloning is needed
-if [ ! -f "package.json" ] && [ ! -f "SYED-Panel/package.json" ]; then
+if [ ! -f "package.json" ] && [ ! -f "Syed-Panel/package.json" ]; then
     echo -e "  \033[38;5;51m⚡ Initializing SYED Panel files...\033[0m"
     if ! command -v git > /dev/null 2>&1 || ! command -v curl > /dev/null 2>&1; then
         if command -v apt-get > /dev/null 2>&1; then
@@ -42,13 +42,13 @@ if [ ! -f "package.json" ] && [ ! -f "SYED-Panel/package.json" ]; then
             (dnf install -y git curl tar ca-certificates > /dev/null 2>&1 || sudo dnf install -y git curl tar ca-certificates > /dev/null 2>&1 || true)
         fi
     fi
-    git clone https://github.com/SYEDHACKEROFFICIAL/Syed-Panel SYED-Panel 2>/dev/null || git clone https://github.com/SYEDHACKEROFFICIAL/Syed-Panel.git SYED-Panel 2>/dev/null || true
+    git clone https://github.com/SYEDHACKEROFFICIAL/Syed-Panel Syed-Panel 2>/dev/null || git clone https://github.com/SYEDHACKEROFFICIAL/Syed-Panel.git Syed-Panel 2>/dev/null || true
 fi
 
 if [ -f "package.json" ]; then
     WORK_DIR="."
-elif [ -d "SYED-Panel" ] && [ -f "SYED-Panel/package.json" ]; then
-    WORK_DIR="SYED-Panel"
+elif [ -d "Syed-Panel" ] && [ -f "Syed-Panel/package.json" ]; then
+    WORK_DIR="Syed-Panel"
 else
     WORK_DIR="."
 fi
