@@ -8,6 +8,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "r
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Welcome from "./pages/Welcome";
 import Dashboard from "./pages/Dashboard";
 import ServerList from "./pages/ServerList";
 import CreateServer from "./pages/CreateServer";
@@ -41,6 +42,25 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <Layout>{children}</Layout>;
 };
 
+const HomeGate = () => {
+  const { user, loading } = useAuth();
+  if (loading) return (
+    <div className="h-[100dvh] w-full flex items-center justify-center bg-transparent text-foreground">
+      <motion.div
+        animate={{ scale: [1, 1.2, 1], rotate: [0, 180, 360] }}
+        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+        className="w-16 h-16 border-4 border-theme-600 border-t-transparent rounded-full"
+      />
+    </div>
+  );
+  if (!user) return <Welcome />;
+  return (
+    <ProtectedRoute>
+      <Dashboard />
+    </ProtectedRoute>
+  );
+};
+
 const AnimatedRoutes = () => {
   const location = useLocation();
   return (
@@ -56,7 +76,7 @@ const AnimatedRoutes = () => {
         <Routes location={location}>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/" element={<HomeGate />} />
           <Route path="/nodes" element={<ProtectedRoute><Nodes /></ProtectedRoute>} />
           <Route path="/servers" element={<ProtectedRoute><ServerList /></ProtectedRoute>} />
           <Route path="/servers/create" element={<ProtectedRoute><CreateServer /></ProtectedRoute>} />
