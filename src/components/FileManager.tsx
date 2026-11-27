@@ -5,7 +5,8 @@ import axios from "axios";
 import { 
   Folder, File, ArrowLeft, Upload, Trash2, Edit2, Save, Archive, Search, X, 
   CheckSquare, Square, Download, FilePlus, FolderPlus, MoreVertical, FileText, 
-  FileArchive, FileCode, Check, AlertTriangle, ChevronRight, FolderDown, RefreshCw
+  FileArchive, FileCode, Check, AlertTriangle, ChevronRight, FolderDown, RefreshCw,
+  Undo2, Redo2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -20,11 +21,60 @@ interface Toast {
   type: "success" | "error";
 }
 
+// Binary extensions jo text editor me NAHI khulengi — is ke ilawa HAR file
+// text samajh kar khulegi (user order 2026-11-28: .js/.html/.css/.py sab khulni chahiye,
+// sirf asal binary files par rok lage).
+const BINARY_EXTS = new Set([
+  "zip", "tar", "gz", "tgz", "bz2", "xz", "rar", "7z", "jar", "war", "class",
+  "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "avif", "tif", "tiff",
+  "mp3", "wav", "ogg", "flac", "mp4", "avi", "mov", "mkv", "webm",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "exe", "dll", "so", "dylib", "bin", "dat", "wasm", "node",
+  "ttf", "otf", "woff", "woff2", "eot", "sqlite", "sqlite3", "db"
+]);
+function isEditableFile(name: string): boolean {
+  const base = name.split("/").pop() || name;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return true; // koi extension nahi, ya dotfile (.env, .gitignore) — text hai
+  return !BINARY_EXTS.has(base.slice(dot + 1).toLowerCase());
+}
+
 export default function FileManager({ serverId }: { serverId: string }) {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [path, setPath] = useState("/");
   const [editingFile, setEditingFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState("");
+  // Editor Undo/Redo history (user order 2026-11-28)
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+  const lastHistPush = useRef(0);
+  const [, setHistTick] = useState(0);
+  const handleContentChange = (val: string) => {
+    const now = Date.now();
+    if (now - lastHistPush.current > 400) {
+      undoStack.current.push(fileContent);
+      if (undoStack.current.length > 100) undoStack.current.shift();
+      redoStack.current = [];
+      lastHistPush.current = now;
+    }
+    setFileContent(val);
+  };
+  const doUndo = () => {
+    const prev = undoStack.current.pop();
+    if (prev === undefined) return;
+    redoStack.current.push(fileContent);
+    setFileContent(prev);
+    lastHistPush.current = Date.now();
+    setHistTick(t => t + 1);
+  };
+  const doRedo = () => {
+    const nxt = redoStack.current.pop();
+    if (nxt === undefined) return;
+    undoStack.current.push(fileContent);
+    setFileContent(nxt);
+    lastHistPush.current = Date.now();
+    setHistTick(t => t + 1);
+  };
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const { startUpload } = useUpload();
   const [searchQuery, setSearchQuery] = useState("");
@@ -119,7 +169,7 @@ export default function FileManager({ serverId }: { serverId: string }) {
   };
 
   const openFile = async (name: string) => {
-    if (!name.match(/\.(txt|json|yml|yaml|properties|log|conf|ini|sh|bat|cmd|env|toml|xml|md)$/i)) {
+    if (!isEditableFile(name)) {
       showToast("Binary format cannot be directly edited in text editor.", "error");
       return;
     }
@@ -128,6 +178,9 @@ export default function FileManager({ serverId }: { serverId: string }) {
       setIsLoading(true);
       const res = await axios.get(`/api/servers/${serverId}/files?path=${encodeURIComponent(fullPath)}`);
       if (res.data.isFile) {
+        undoStack.current = [];
+        redoStack.current = [];
+        lastHistPush.current = 0;
         setEditingFile(name);
         setFileContent(res.data.content);
       }
@@ -196,7 +249,7 @@ export default function FileManager({ serverId }: { serverId: string }) {
       setActiveModal(null);
       setModalInput("");
       fetchFiles();
-      if (fileName.match(/\.(txt|json|yml|yaml|properties|log|conf|ini|sh|bat|cmd|env|toml|xml|md)$/i)) {
+      if (isEditableFile(fileName)) {
         openFile(fileName);
       }
     } catch (e) {
@@ -525,6 +578,25 @@ export default function FileManager({ serverId }: { serverId: string }) {
               )}
             </>
           ) : (
+            <>
+            <button
+              onClick={doUndo}
+              disabled={undoStack.current.length === 0}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-muted/80 hover:bg-muted rounded-xl text-xs font-semibold text-foreground border border-border hover:border-theme-600/40 transition-all disabled:opacity-40 cursor-pointer"
+              title="Undo (purana text wapas)"
+            >
+              <Undo2 size={15} className="text-theme-500" />
+              <span className="hidden sm:inline">Undo</span>
+            </button>
+            <button
+              onClick={doRedo}
+              disabled={redoStack.current.length === 0}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-muted/80 hover:bg-muted rounded-xl text-xs font-semibold text-foreground border border-border hover:border-theme-600/40 transition-all disabled:opacity-40 cursor-pointer"
+              title="Redo"
+            >
+              <Redo2 size={15} className="text-theme-500" />
+              <span className="hidden sm:inline">Redo</span>
+            </button>
             <button 
               disabled={isSaving} 
               onClick={saveFile} 
@@ -533,6 +605,7 @@ export default function FileManager({ serverId }: { serverId: string }) {
               {isSaving ? <div className="w-4 h-4 rounded-full border-2 border-white/50 border-t-white animate-spin" /> : <Save size={16} />}
               <span>{isSaving ? "Saving..." : "Save Changes"}</span>
             </button>
+            </>
           )}
         </div>
       </div>
@@ -548,7 +621,7 @@ export default function FileManager({ serverId }: { serverId: string }) {
             >
               <textarea 
                 value={fileContent} 
-                onChange={(e) => setFileContent(e.target.value)}
+                onChange={(e) => handleContentChange(e.target.value)}
                 className="flex-1 w-full h-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-slate-200 font-mono text-xs sm:text-sm focus:outline-none focus:border-theme-600/50 resize-none custom-scrollbar min-h-0 shadow-inner leading-relaxed"
                 spellCheck={false}
               />
