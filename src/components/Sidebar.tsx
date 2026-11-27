@@ -117,7 +117,7 @@ export function Sidebar({ onClose, isCollapsed, toggleCollapse }: SidebarProps) 
                 },
               },
               {
-                name: "Fleet Overview",
+                name: "All Servers",
                 path: "/admin/servers",
                 icon: <Box size={18} />,
                 color: {
