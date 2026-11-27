@@ -204,6 +204,32 @@ export const startLocalServer = async (id: string, serverData: any) => {
     });
   };
 
+  // The panel seeds every new server with a ready-made starter file. If the
+  // user uploaded their own entry file, the seed must not shadow it —
+  // otherwise the seed runs forever and the user's app never starts.
+  const isSeedContent = async (filePath: string, marker: string) => {
+    try {
+      const fd = await fs.open(filePath, "r");
+      const buf = Buffer.alloc(300);
+      const { bytesRead } = await fd.read(buf, 0, 300, 0);
+      await fd.close();
+      return buf.toString("utf8", 0, bytesRead).includes(marker);
+    } catch (e) { return false; }
+  };
+  const pickEntry = async (candidates: string[], seedFile: string, marker: string) => {
+    const existing: string[] = [];
+    for (const f of candidates) {
+      if (await fs.pathExists(path.join(serverPath, f))) existing.push(f);
+    }
+    if (existing.length === 0) return candidates[0];
+    const first = existing[0];
+    if (first === seedFile && existing.length > 1 && await isSeedContent(path.join(serverPath, first), marker)) {
+      logMessage(`Skipping panel seed ${seedFile} — running your ${existing[1]} instead.`);
+      return existing[1];
+    }
+    return first;
+  };
+
   if (serverData.startupCommand && serverData.startupCommand.trim()) {
     // Custom startup command (all server types): run through the shell.
     child = spawn("/bin/sh", ["-c", serverData.startupCommand], {
@@ -227,20 +253,16 @@ export const startLocalServer = async (id: string, serverData: any) => {
     if (hasDeps && !await fs.pathExists(path.join(serverPath, "node_modules"))) {
       await runPreStep("npm", ["install", "--omit=dev"], "Installing Node.js dependencies (npm install)...");
     }
-    if (pkg && pkg.scripts && typeof pkg.scripts.start === "string" && pkg.scripts.start.trim()) {
+    const pkgRaw = pkg ? await fs.readFile(pkgPath, "utf8").catch(() => "") : "";
+    const pkgIsSeed = pkgRaw.includes("Node.js application hosted on SYED Panel");
+    if (pkg && !pkgIsSeed && pkg.scripts && typeof pkg.scripts.start === "string" && pkg.scripts.start.trim()) {
       child = spawn("npm", ["start"], {
         cwd: serverPath,
         env: nodeEnv,
         stdio: ["pipe", "pipe", "pipe"]
       });
     } else {
-      let entry = "index.js";
-      for (const testFile of ["index.js", "app.js", "server.js", "main.js", "bot.js"]) {
-        if (await fs.pathExists(path.join(serverPath, testFile))) {
-          entry = testFile;
-          break;
-        }
-      }
+      const entry = await pickEntry(["index.js", "app.js", "server.js", "main.js", "bot.js"], "index.js", "Node.js Application on SYED Panel");
       child = spawn("node", [entry], {
         cwd: serverPath,
         env: nodeEnv,
@@ -251,13 +273,7 @@ export const startLocalServer = async (id: string, serverData: any) => {
     if (await fs.pathExists(path.join(serverPath, "requirements.txt"))) {
       await runPreStep("python3", ["-m", "pip", "install", "--break-system-packages", "-q", "-r", "requirements.txt"], "Installing Python dependencies (pip install -r requirements.txt)...");
     }
-    let entry = "app.py";
-    for (const testFile of ["app.py", "main.py", "bot.py", "index.py", "server.py"]) {
-      if (await fs.pathExists(path.join(serverPath, testFile))) {
-        entry = testFile;
-        break;
-      }
-    }
+    const entry = await pickEntry(["app.py", "main.py", "bot.py", "index.py", "server.py"], "app.py", "Python Application on SYED Panel");
     child = spawn("python3", ["-u", entry], {
       cwd: serverPath,
       env: {
