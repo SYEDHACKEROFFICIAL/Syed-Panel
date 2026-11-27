@@ -71,6 +71,10 @@ export default function ServerSettings({ serverId, server }: { serverId: string,
   if (!server) return null;
   const canManage = (user?.role === "admin" || user?.role === "owner") || server.owner === user?.id;
 
+  const isWebsiteLike = ["WEBSITE", "PHP"].includes((server?.type || "").toUpperCase());
+  const slugifyName = (name: string) => (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site";
+  const websiteUrl = `https://${server?.websiteSlug || slugifyName(server?.name || "")}.syedhacker.com`;
+
   const handleDelete = async () => {
     try {
       setIsDeletingAction(true);
@@ -191,6 +195,33 @@ export default function ServerSettings({ serverId, server }: { serverId: string,
 
         {canManage ? (
           <>
+
+            {isWebsiteLike && (
+              <div className="bg-black/40 dark:bg-black/40 backdrop-blur-xl border border-border p-6 md:p-8 rounded-3xl shadow-[0_0_40px_-15px_rgba(0,0,0,0.5)] ring-1 ring-border-subtle relative z-30 group hover:bg-black/60 transition-colors mb-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-foreground font-bold flex items-center">
+                    <Globe className="w-5 h-5 mr-2 text-theme-500" /> Website
+                  </h3>
+                  <a
+                    href={websiteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-2 bg-theme-600/10 hover:bg-theme-600/20 text-theme-600 font-medium rounded-xl border border-theme-600/20 transition-all text-sm"
+                  >
+                    Open
+                  </a>
+                </div>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Your website is live at{" "}
+                  <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-theme-400 font-mono hover:underline">
+                    {websiteUrl}
+                  </a>
+                </p>
+                <p className="text-muted-foreground text-sm">
+                  Upload index.html and your assets in the File Manager — changes go live instantly. Start/Stop controls whether the site is reachable.
+                </p>
+              </div>
+            )}
 
             <div className="bg-black/40 dark:bg-black/40 backdrop-blur-xl border border-border p-6 md:p-8 rounded-3xl shadow-[0_0_40px_-15px_rgba(0,0,0,0.5)] ring-1 ring-border-subtle relative z-30 group hover:bg-black/60 transition-colors mb-8">
               <div className="flex items-center justify-between mb-2">

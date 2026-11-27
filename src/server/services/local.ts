@@ -84,7 +84,7 @@ export const createLocalServer = async (serverData: any) => {
     }
     return `local-${serverData.id}`;
   } else if (type === "python" || type === "python3") {
-    const mainPath = path.join(serverPath, "main.py");
+    const mainPath = path.join(serverPath, "app.py");
     const reqPath = path.join(serverPath, "requirements.txt");
     if (!await fs.pathExists(mainPath)) {
       await fs.writeFile(mainPath, `# Python Application on SYED Panel\nimport os\nimport sys\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\n\nport = int(os.environ.get("SERVER_PORT", os.environ.get("PORT", ${serverData.port || 8000})))\nprint("==============================================", flush=True)\nprint("🐍 Python Application Running", flush=True)\nprint(f"Python Version: {sys.version}", flush=True)\nprint(f"Listening Port: {port}", flush=True)\nprint("Upload your files in File Manager to customize!", flush=True)\nprint("==============================================", flush=True)\n\nclass RequestHandler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.send_header('Content-type', 'application/json')\n        self.end_headers()\n        self.wfile.write(b'{"status": "online", "runtime": "python"}')\n\n    def log_message(self, format, *args):\n        print(f"[{self.log_date_time_string()}] {format % args}", flush=True)\n\nserver = HTTPServer(('0.0.0.0', port), RequestHandler)\nprint(f"[Server] Listening on http://0.0.0.0:{port}", flush=True)\ntry:\n    server.serve_forever()\nexcept KeyboardInterrupt:\n    print("\\nStopping server...", flush=True)\n    server.server_close()\n`);
@@ -92,6 +92,9 @@ export const createLocalServer = async (serverData: any) => {
     if (!await fs.pathExists(reqPath)) {
       await fs.writeFile(reqPath, "# Add python dependencies here\n");
     }
+    return `local-${serverData.id}`;
+  } else if (["website", "php", "golang", "go", "ruby"].includes(type)) {
+    // Website / PHP / Go / Ruby files are pre-seeded by the panel controller; nothing to provision here.
     return `local-${serverData.id}`;
   } else if (type === "velocity") {
     const configPath = path.join(serverPath, "velocity.toml");
@@ -162,27 +165,94 @@ export const startLocalServer = async (id: string, serverData: any) => {
 
   let child: any;
 
-  if (type === "nodejs" || type === "node") {
-    let entry = "index.js";
-    for (const testFile of ["index.js", "app.js", "server.js", "main.js", "bot.js"]) {
-      if (await fs.pathExists(path.join(serverPath, testFile))) {
-        entry = testFile;
-        break;
-      }
-    }
-    child = spawn("node", [entry], {
+  const baseEnv = {
+    ...process.env,
+    PORT: String(serverData.port || 3000),
+    SERVER_PORT: String(serverData.port || 3000),
+    NODE_ENV: "production",
+    PYTHONUNBUFFERED: "1"
+  };
+
+  // Runs a one-off install step, streaming its output to the server console.
+  // Resolves when the step exits; failures are logged but never block startup.
+  const runPreStep = async (command: string, args: string[], label: string) => {
+    logMessage(label);
+    await new Promise<void>((resolve) => {
+      const pre = spawn(command, args, {
+        cwd: serverPath,
+        env: baseEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      pre.stdout?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        if (logStream.writable) logStream.write(text);
+        emitLog(text);
+      });
+      pre.stderr?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        if (logStream.writable) logStream.write(text);
+        emitLog(text);
+      });
+      pre.on("error", (err: Error) => {
+        logMessage(`Install step failed: ${err.message}. Continuing with startup...`);
+        resolve();
+      });
+      pre.on("close", (code: number | null) => {
+        if (code !== 0) logMessage(`Install step exited with code ${code}. Continuing with startup...`);
+        resolve();
+      });
+    });
+  };
+
+  if (serverData.startupCommand && serverData.startupCommand.trim()) {
+    // Custom startup command (all server types): run through the shell.
+    child = spawn("/bin/sh", ["-c", serverData.startupCommand], {
       cwd: serverPath,
-      env: {
-        ...process.env,
-        PORT: String(serverData.port || 3000),
-        SERVER_PORT: String(serverData.port || 3000),
-        NODE_ENV: "production"
-      },
+      env: baseEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
+  } else if (type === "nodejs" || type === "node") {
+    const nodeEnv = {
+      ...process.env,
+      PORT: String(serverData.port || 3000),
+      SERVER_PORT: String(serverData.port || 3000),
+      NODE_ENV: "production"
+    };
+    let pkg: any = null;
+    const pkgPath = path.join(serverPath, "package.json");
+    if (await fs.pathExists(pkgPath)) {
+      try { pkg = await fs.readJson(pkgPath); } catch (e) { pkg = null; }
+    }
+    const hasDeps = !!(pkg && pkg.dependencies && Object.keys(pkg.dependencies).length > 0);
+    if (hasDeps && !await fs.pathExists(path.join(serverPath, "node_modules"))) {
+      await runPreStep("npm", ["install", "--omit=dev"], "Installing Node.js dependencies (npm install)...");
+    }
+    if (pkg && pkg.scripts && typeof pkg.scripts.start === "string" && pkg.scripts.start.trim()) {
+      child = spawn("npm", ["start"], {
+        cwd: serverPath,
+        env: nodeEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+    } else {
+      let entry = "index.js";
+      for (const testFile of ["index.js", "app.js", "server.js", "main.js", "bot.js"]) {
+        if (await fs.pathExists(path.join(serverPath, testFile))) {
+          entry = testFile;
+          break;
+        }
+      }
+      child = spawn("node", [entry], {
+        cwd: serverPath,
+        env: nodeEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+    }
   } else if (type === "python" || type === "python3") {
-    let entry = "main.py";
-    for (const testFile of ["main.py", "app.py", "bot.py", "index.py", "server.py"]) {
+    if (await fs.pathExists(path.join(serverPath, "requirements.txt"))) {
+      await runPreStep("python3", ["-m", "pip", "install", "--break-system-packages", "-q", "-r", "requirements.txt"], "Installing Python dependencies (pip install -r requirements.txt)...");
+    }
+    let entry = "app.py";
+    for (const testFile of ["app.py", "main.py", "bot.py", "index.py", "server.py"]) {
       if (await fs.pathExists(path.join(serverPath, testFile))) {
         entry = testFile;
         break;
@@ -195,6 +265,43 @@ export const startLocalServer = async (id: string, serverData: any) => {
         PORT: String(serverData.port || 8000),
         SERVER_PORT: String(serverData.port || 8000),
         PYTHONUNBUFFERED: "1"
+      },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+  } else if (type === "golang" || type === "go") {
+    child = spawn("/bin/sh", ["-c", "go run ."], {
+      cwd: serverPath,
+      env: {
+        ...process.env,
+        PORT: String(serverData.port || 3000),
+        SERVER_PORT: String(serverData.port || 3000)
+      },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+  } else if (type === "php") {
+    child = spawn("php", ["-S", `0.0.0.0:${serverData.port || 8000}`, "-t", serverPath], {
+      cwd: serverPath,
+      env: {
+        ...process.env,
+        PORT: String(serverData.port || 8000),
+        SERVER_PORT: String(serverData.port || 8000)
+      },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+  } else if (type === "ruby") {
+    let entry = "app.rb";
+    for (const testFile of ["app.rb", "main.rb", "index.rb"]) {
+      if (await fs.pathExists(path.join(serverPath, testFile))) {
+        entry = testFile;
+        break;
+      }
+    }
+    child = spawn("ruby", [entry], {
+      cwd: serverPath,
+      env: {
+        ...process.env,
+        PORT: String(serverData.port || 3000),
+        SERVER_PORT: String(serverData.port || 3000)
       },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -235,20 +342,10 @@ export const startLocalServer = async (id: string, serverData: any) => {
       throw new Error(errMessage);
     }
 
-    if (serverData.startupCommand && serverData.startupCommand.trim()) {
-      const parts = serverData.startupCommand.trim().split(/\s+/);
-      const bin = parts[0];
-      const args = parts.slice(1);
-      child = spawn(bin, args, {
-        cwd: serverPath,
-        stdio: ["pipe", "pipe", "pipe"]
-      });
-    } else {
-      child = spawn(javaBin, [`-Xms${memory}G`, `-Xmx${memory}G`, "-Djline.terminal=jline.UnsupportedTerminal", "-jar", "server.jar", "nogui", "--nojline"], {
-        cwd: serverPath,
-        stdio: ["pipe", "pipe", "pipe"]
-      });
-    }
+    child = spawn(javaBin, [`-Xms${memory}G`, `-Xmx${memory}G`, "-Djline.terminal=jline.UnsupportedTerminal", "-jar", "server.jar", "nogui", "--nojline"], {
+      cwd: serverPath,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
   }
 
   processes.set(id, child);

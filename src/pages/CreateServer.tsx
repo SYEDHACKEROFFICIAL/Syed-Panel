@@ -8,7 +8,7 @@ import {
   ArrowLeft, Server, AlertTriangle, AlignLeft, MemoryStick as MemoryStickIcon,
   Cpu, Zap, Sparkles, HardDrive, Globe, User, Radio, GitBranch, Check,
   ChevronDown, Search, Rocket, SlidersHorizontal, FastForward, Network,
-  Wrench, Feather, Info, Code2, TerminalSquare, Lock
+  Wrench, Feather, Info, Code2, TerminalSquare, Lock, Code, FileCode, Gem
 } from "lucide-react";
 
 const pageStyles = `
@@ -107,8 +107,17 @@ const MINECRAFT_SOFTWARE = [
 
 const APPLICATION_SOFTWARE = [
   {id:'nodejs',name:'Node.js',desc:'JS / TS Runtime & Discord Bots',icon: Code2},
-  {id:'python',name:'Python',desc:'Python 3.x Runtime & Scripts',icon: TerminalSquare}
+  {id:'python',name:'Python',desc:'Python 3.x Runtime & Scripts',icon: TerminalSquare},
+  {id:'website',name:'Website',desc:'Static Website Hosting — Free Subdomain',icon: Globe},
+  {id:'php',name:'PHP Website',desc:'PHP Website Hosting — Free Subdomain',icon: FileCode},
+  {id:'golang',name:'Go (Golang)',desc:'Go Language Runtime',icon: Code},
+  {id:'ruby',name:'Ruby',desc:'Ruby Runtime',icon: Gem}
 ];
+
+// Types that never show a version picker (no Minecraft/runtime versions apply)
+const NO_VERSION_SOFTWARE = ['website', 'php', 'golang', 'ruby'];
+
+const slugifyName = (name: string) => (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site";
 
 const SOFTWARE = [...MINECRAFT_SOFTWARE, ...APPLICATION_SOFTWARE];
 
@@ -416,7 +425,7 @@ export default function CreateServer() {
           position: 'fixed', top: 0, left: 0, height: '2px', width: '100%', zIndex: 100, 
           background: '#fff', transformOrigin: 'left', 
           transform: `scaleX(${(currentStep + 1) / STEPS.length})`, 
-          boxSyed: '0 0 12px rgba(255,255,255,.7)', transition: 'transform .5s cubic-bezier(.16,1,.3,1)' 
+          boxShadow: '0 0 12px rgba(255,255,255,.7)', transition: 'transform .5s cubic-bezier(.16,1,.3,1)'
         }} 
       />
 
@@ -886,6 +895,7 @@ export default function CreateServer() {
                     )}
                   </div>
 
+                  {!NO_VERSION_SOFTWARE.includes(state.software) && (
                   <div>
                     <label className="flex items-center gap-2 text-sm text-[#8f8f8f] mb-2.5">
                       <GitBranch className="w-4 h-4" /> {['nodejs', 'python'].includes(state.software) ? 'Runtime Version' : 'Software Version'}
@@ -905,6 +915,7 @@ export default function CreateServer() {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -931,8 +942,9 @@ export default function CreateServer() {
                         {(user?.role === "admin" || user?.role === "owner") && renderReviewRow('OWNER ID', state.owner || '—')}
                         {(user?.role === "admin" || user?.role === "owner") && renderReviewRow('NODE ID', state.node || '—')}
                         {renderReviewRow('SOFTWARE', SOFTWARE.find(s => s.id === state.software)?.name || 'Unknown')}
-                        {renderReviewRow('VERSION', state.version || 'latest')}
-                        {!['nodejs', 'python'].includes(state.software) && renderReviewRow('JAVA RUNTIME', `Java ${getJavaVersionForMinecraft(state.version, state.software)} (Auto-detected)`)}
+                        {(state.software === 'website' || state.software === 'php') && renderReviewRow('WEBSITE URL', `https://${slugifyName(state.name)}.syedhacker.com`)}
+                        {!NO_VERSION_SOFTWARE.includes(state.software) && renderReviewRow('VERSION', state.version || 'latest')}
+                        {!['nodejs', 'python', ...NO_VERSION_SOFTWARE].includes(state.software) && renderReviewRow('JAVA RUNTIME', `Java ${getJavaVersionForMinecraft(state.version, state.software)} (Auto-detected)`)}
                         
                         <div className="px-4 py-4">
                           <div className="flex justify-between text-[10px] text-[#4c4c4c] tracking-widest mb-2 font-mono">

@@ -26,6 +26,24 @@ import { extractArchive } from "../utils/extract.js";
 
 const serverOperationLocks = new Set<string>();
 
+const isWebsiteServer = (server: any) => (server?.type || "").toUpperCase() === "WEBSITE";
+
+const slugifyWebsiteName = (name: string) => {
+  const base = (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || "site";
+};
+
+const uniqueWebsiteSlug = (name: string, servers: any[]) => {
+  const base = slugifyWebsiteName(name);
+  let slug = base;
+  let n = 2;
+  while (servers.some((s: any) => s.websiteSlug === slug)) {
+    slug = `${base}-${n}`;
+    n++;
+  }
+  return slug;
+};
+
 export const getServers = async (req: Request, res: Response) => {
   const user = (req as any).user;
   const servers = await readJSON("servers.json") || [];
@@ -35,6 +53,11 @@ export const getServers = async (req: Request, res: Response) => {
 
   // Update statuses
   const updatedServers = await Promise.all(userServers.map(async (server: any) => {
+    if (isWebsiteServer(server)) {
+      // Websites are served statically by the panel itself; keep the stored status.
+      server.status = server.suspended ? "suspended" : (server.status || "online");
+      return server;
+    }
     if (server.containerId) {
       const status = await getServerRuntimeStatus(server);
       const isRunning = !!status?.State?.Running;
@@ -66,6 +89,12 @@ export const getServer = async (req: Request, res: Response) => {
   }
   if (user.role !== "admin" && user.role !== "owner" && server.owner !== user.id) {
     return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (isWebsiteServer(server)) {
+    // Websites are served statically by the panel itself; keep the stored status.
+    server.status = server.suspended ? "suspended" : (server.status || "online");
+    return res.json(server);
   }
 
   const status = await getServerRuntimeStatus(server);
@@ -189,6 +218,7 @@ export const createServer = async (req: Request, res: Response) => {
     status: "installing",
     createdAt: new Date().toISOString(),
     containerId: null as string | null,
+    websiteSlug: undefined as string | undefined,
   };
 
   const servers = await readJSON("servers.json") || [];
@@ -196,6 +226,11 @@ export const createServer = async (req: Request, res: Response) => {
   if (servers.find((s: any) => s.port == port)) {
     res.status(400).json({ error: "Port is already in use by another server." });
     return;
+  }
+
+  const upperTypeCreate = (type || "PAPER").toUpperCase();
+  if (upperTypeCreate === "WEBSITE" || upperTypeCreate === "PHP") {
+    serverData.websiteSlug = uniqueWebsiteSlug(name, servers);
   }
 
   servers.push(serverData);
@@ -225,13 +260,154 @@ export const createServer = async (req: Request, res: Response) => {
         }, null, 2));
       }
     } else if (upperType === "PYTHON" || upperType === "PYTHON3") {
-      const mainPath = path.join(serverDir, "main.py");
+      const mainPath = path.join(serverDir, "app.py");
       const reqPath = path.join(serverDir, "requirements.txt");
       if (!fs.existsSync(mainPath)) {
         await fs.writeFile(mainPath, `# Python Application on SYED Panel\nimport os\nimport sys\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\n\nport = int(os.environ.get("SERVER_PORT", os.environ.get("PORT", ${port})))\n\nprint("==============================================", flush=True)\nprint("🐍 Python Application Running", flush=True)\nprint(f"Python Version: {sys.version}", flush=True)\nprint(f"Listening Port: {port}", flush=True)\nprint("Upload your files in File Manager to customize!", flush=True)\nprint("==============================================", flush=True)\n\nclass RequestHandler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.send_header('Content-type', 'application/json')\n        self.end_headers()\n        self.wfile.write(b'{"status": "online", "runtime": "python"}')\n\n    def log_message(self, format, *args):\n        print(f"[{self.log_date_time_string()}] {format % args}", flush=True)\n\nserver = HTTPServer(('0.0.0.0', port), RequestHandler)\nprint(f"[Server] Listening on http://0.0.0.0:{port}", flush=True)\n\ntry:\n    server.serve_forever()\nexcept KeyboardInterrupt:\n    print("\\nStopping server...", flush=True)\n    server.server_close()\n`);
       }
       if (!fs.existsSync(reqPath)) {
         await fs.writeFile(reqPath, "# Add python dependencies here\n");
+      }
+    } else if (upperType === "GOLANG" || upperType === "GO") {
+      const goMainPath = path.join(serverDir, "main.go");
+      const goModPath = path.join(serverDir, "go.mod");
+      if (!fs.existsSync(goMainPath)) {
+        await fs.writeFile(goMainPath, `package main
+
+import (
+  "encoding/json"
+  "fmt"
+  "net/http"
+  "os"
+)
+
+func main() {
+  port := os.Getenv("PORT")
+  if port == "" {
+    port = os.Getenv("SERVER_PORT")
+  }
+  if port == "" {
+    port = "${port}"
+  }
+
+  fmt.Println("==============================================")
+  fmt.Println("Go Application Running on SYED Panel")
+  fmt.Println("Listening Port: " + port)
+  fmt.Println("Upload your files in File Manager to customize!")
+  fmt.Println("==============================================")
+
+  http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"status": "online", "runtime": "go"})
+  })
+
+  fmt.Println("[Server] Listening on http://0.0.0.0:" + port)
+  if err := http.ListenAndServe("0.0.0.0:"+port, nil); err != nil {
+    fmt.Println("Server error:", err)
+  }
+}
+`);
+      }
+      if (!fs.existsSync(goModPath)) {
+        await fs.writeFile(goModPath, "module syedapp\n\ngo 1.21\n");
+      }
+    } else if (upperType === "PHP") {
+      const phpIndexPath = path.join(serverDir, "index.php");
+      if (!fs.existsSync(phpIndexPath)) {
+        await fs.writeFile(phpIndexPath, `<?php $pageTitle = "PHP Website is Live!"; ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><?php echo $pageTitle; ?> — SYED Panel</title>
+<style>
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #0a0a0f; color: #f5f5f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { max-width: 640px; margin: 24px; padding: 40px; background: #12121c; border: 1px solid #26263a; border-radius: 16px; text-align: center; }
+  h1 { margin: 0 0 12px; font-size: 30px; }
+  p { color: #b9b9cc; line-height: 1.6; }
+  code { background: #1d1d2e; padding: 2px 8px; border-radius: 6px; color: #ffffff; }
+  .badge { display: inline-block; margin-top: 16px; padding: 6px 14px; border: 1px solid #26263a; border-radius: 999px; font-size: 13px; color: #b9b9cc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><?php echo $pageTitle; ?></h1>
+    <p>This PHP website is hosted on <strong>SYED Panel</strong>.</p>
+    <p>PHP Version: <code><?php echo phpversion(); ?></code></p>
+    <p>Upload your own <code>index.php</code> and assets in the File Manager to replace this page — changes go live instantly.</p>
+    <span class="badge">Powered by SYED Panel</span>
+  </div>
+</body>
+</html>
+`);
+      }
+    } else if (upperType === "RUBY") {
+      const rubyAppPath = path.join(serverDir, "app.rb");
+      if (!fs.existsSync(rubyAppPath)) {
+        await fs.writeFile(rubyAppPath, `require "socket"
+require "json"
+
+port = (ENV["PORT"] || ENV["SERVER_PORT"] || "${port}").to_i
+server = TCPServer.new("0.0.0.0", port)
+
+puts "=============================================="
+puts "Ruby Application Running on SYED Panel"
+puts "Listening Port: #{port}"
+puts "Upload your files in File Manager to customize!"
+puts "=============================================="
+puts "[Server] Listening on http://0.0.0.0:#{port}"
+
+loop do
+  client = server.accept
+  begin
+    client.gets
+    while (line = client.gets) && line != "\\r\\n"
+    end
+    body = { status: "online", runtime: "ruby" }.to_json
+    client.write "HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: #{body.bytesize}\\r\\nConnection: close\\r\\n\\r\\n#{body}"
+  rescue => e
+    puts "Request error: #{e.message}"
+  ensure
+    begin
+      client.close
+    rescue StandardError
+      nil
+    end
+  end
+end
+`);
+      }
+    } else if (upperType === "WEBSITE") {
+      const webIndexPath = path.join(serverDir, "index.html");
+      if (!fs.existsSync(webIndexPath)) {
+        await fs.writeFile(webIndexPath, `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Website is Live! — SYED Panel</title>
+<style>
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #0a0a0f; color: #f5f5f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { max-width: 640px; margin: 24px; padding: 40px; background: #12121c; border: 1px solid #26263a; border-radius: 16px; text-align: center; }
+  h1 { margin: 0 0 12px; font-size: 30px; }
+  p { color: #b9b9cc; line-height: 1.6; }
+  code { background: #1d1d2e; padding: 2px 8px; border-radius: 6px; color: #ffffff; }
+  .url { display: inline-block; margin-top: 8px; padding: 8px 16px; border: 1px solid #26263a; border-radius: 999px; font-size: 14px; color: #ffffff; }
+  .badge { display: inline-block; margin-top: 16px; padding: 6px 14px; border: 1px solid #26263a; border-radius: 999px; font-size: 13px; color: #b9b9cc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Your Website is Live!</h1>
+    <p>This website is hosted on <strong>SYED Panel</strong>.</p>
+    <span class="url">https://${serverData.websiteSlug}.syedhacker.com</span>
+    <p>Replace this page by uploading your own <code>index.html</code> and assets in the File Manager — changes go live instantly.</p>
+    <span class="badge">Powered by SYED Panel</span>
+  </div>
+</body>
+</html>
+`);
       }
     } else {
       // Minecraft Server Pre-seeding
@@ -260,7 +436,7 @@ export const createServer = async (req: Request, res: Response) => {
   try {
     const containerId = await createServerRuntime(serverData);
     serverData.containerId = containerId;
-    serverData.status = "offline";
+    serverData.status = upperTypeCreate === "WEBSITE" ? "online" : "offline";
     await writeJSON("servers.json", Object.assign(servers, servers.map((s:any)=>s.id===id?serverData:s)));
     await createSftpUser(id).catch(e => console.error("SFTP user creation failed:", e));
     res.json(serverData);
@@ -379,6 +555,13 @@ export const startServer = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Server is suspended" });
     }
 
+    if (isWebsiteServer(server)) {
+      // Websites have no process; starting one just makes it reachable.
+      server.status = "online";
+      await writeJSON("servers.json", servers);
+      return res.json({ success: true });
+    }
+
     // Check if already running
     const currentStatus = await getServerRuntimeStatus(server);
     if (currentStatus?.State?.Running) {
@@ -402,7 +585,7 @@ export const startServer = async (req: Request, res: Response) => {
 
     // Ensure server.jar is present for Minecraft servers before boot
     const upperType = (server.type || "PAPER").toUpperCase();
-    if (!["NODEJS", "NODE", "PYTHON", "PYTHON3"].includes(upperType)) {
+    if (!["NODEJS", "NODE", "PYTHON", "PYTHON3", "GOLANG", "GO", "RUBY", "PHP", "WEBSITE"].includes(upperType)) {
       const jarPath = path.join(serverDir, "server.jar");
       if (!fs.existsSync(jarPath)) {
         try {
@@ -504,6 +687,14 @@ export const stopServer = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Forbidden: You do not have permission to manage this server" });
     }
 
+    if (isWebsiteServer(server)) {
+      // Websites have no process; stopping one just makes it unreachable.
+      server.status = "offline";
+      server.startedAt = null;
+      await writeJSON("servers.json", servers);
+      return res.json({ success: true });
+    }
+
     try {
       await stopServerRuntime(server);
     } catch (stopErr: any) {
@@ -556,6 +747,13 @@ export const killServer = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Forbidden: You do not have permission to manage this server" });
     }
 
+    if (isWebsiteServer(server)) {
+      server.status = "offline";
+      server.startedAt = null;
+      await writeJSON("servers.json", servers);
+      return res.json({ success: true });
+    }
+
     await killServerRuntime(server);
     server.status = "offline";
     server.startedAt = null;
@@ -591,6 +789,12 @@ export const restartServer = async (req: Request, res: Response) => {
 
     if (user.role !== "admin" && user.role !== "owner" && server.owner !== user.id) {
       return res.status(403).json({ error: "Forbidden: You do not have permission to manage this server" });
+    }
+
+    if (isWebsiteServer(server)) {
+      server.status = "online";
+      await writeJSON("servers.json", servers);
+      return res.json({ success: true });
     }
 
     // Step 1: STOP
@@ -807,7 +1011,7 @@ export const changeServerVersion = async (req: Request, res: Response) => {
 
     // When changing version for Minecraft servers, download the new JAR
     const upperType = (server.type || type || "PAPER").toUpperCase();
-    if (!["NODEJS", "NODE", "PYTHON", "PYTHON3"].includes(upperType)) {
+    if (!["NODEJS", "NODE", "PYTHON", "PYTHON3", "GOLANG", "GO", "RUBY", "PHP", "WEBSITE"].includes(upperType)) {
       const jarPath = path.join(serverDir, "server.jar");
       try {
         console.log(`[changeServerVersion] Downloading new server.jar for ${server.name || id} (${upperType} ${version})...`);

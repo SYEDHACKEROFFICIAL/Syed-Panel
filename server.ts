@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import cors from "cors";
-import { createServer } from "http";
+import { createServer, request as httpRequest } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import fs from "fs-extra";
@@ -88,6 +88,142 @@ const isDev = process.env.NODE_ENV === "development" && PORT === 3000;
 app.use(express.json({ limit: "50gb" }));
 app.use(express.urlencoded({ extended: true, limit: "50gb" }));
 app.use(cors());
+
+// ─── Website Hosting ─────────────────────────────────────────────────────────
+// Servers of type WEBSITE (static) and PHP (dynamic) are reachable at
+// https://<websiteSlug>.syedhacker.com. This middleware only acts on those
+// hosts; the panel's own hosts (panel.*, www.*, apex, anything else) pass
+// straight through to the normal panel/API handling below.
+const SERVERS_FILE = path.join(DATA_DIR, "servers.json");
+let websiteServersCache: { mtimeMs: number; servers: any[] } = { mtimeMs: 0, servers: [] };
+
+const loadWebsiteServers = async (): Promise<any[]> => {
+  try {
+    const stat = await fs.stat(SERVERS_FILE);
+    if (stat.mtimeMs !== websiteServersCache.mtimeMs) {
+      const data = await fs.readJson(SERVERS_FILE).catch(() => []);
+      websiteServersCache = { mtimeMs: stat.mtimeMs, servers: Array.isArray(data) ? data : [] };
+    }
+  } catch (e) {
+    websiteServersCache = { mtimeMs: 0, servers: [] };
+  }
+  return websiteServersCache.servers;
+};
+
+const websiteBrandedPage = (title: string, message: string) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title} — SYED Panel</title>
+<style>
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #0a0a0f; color: #f5f5f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { max-width: 560px; margin: 24px; padding: 40px; background: #12121c; border: 1px solid #26263a; border-radius: 16px; text-align: center; }
+  h1 { margin: 0 0 12px; font-size: 28px; }
+  p { color: #b9b9cc; line-height: 1.6; }
+  .badge { display: inline-block; margin-top: 16px; padding: 6px 14px; border: 1px solid #26263a; border-radius: 999px; font-size: 13px; color: #b9b9cc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>${title}</h1>
+    <p>${message}</p>
+    <span class="badge">Powered by SYED Panel</span>
+  </div>
+</body>
+</html>`;
+
+const proxyToPhpServer = (req: express.Request, res: express.Response, server: any) => {
+  const targetPort = server.port;
+  const headers: Record<string, any> = { ...req.headers, host: `127.0.0.1:${targetPort}` };
+
+  // If a body parser already consumed the request stream (form/JSON posts to
+  // the panel pass through express.json/urlencoded first), re-serialize the
+  // parsed body; otherwise stream the raw request through untouched.
+  let bodyBuffer: Buffer | null = null;
+  const bodyAlreadyParsed = (req as any)._body === true;
+  if (bodyAlreadyParsed && req.body && ["POST", "PUT", "PATCH"].includes(req.method)) {
+    const contentType = String(req.headers["content-type"] || "");
+    let serialized = "";
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      serialized = new URLSearchParams(req.body as Record<string, string>).toString();
+    } else if (contentType.includes("application/json")) {
+      serialized = JSON.stringify(req.body);
+    }
+    bodyBuffer = Buffer.from(serialized);
+    headers["content-length"] = String(bodyBuffer.length);
+  }
+
+  const proxyReq = httpRequest({
+    hostname: "127.0.0.1",
+    port: targetPort,
+    path: req.originalUrl || req.url,
+    method: req.method,
+    headers
+  }, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on("error", () => {
+    if (!res.headersSent) {
+      res.status(502).type("html").send(websiteBrandedPage("Website Unavailable", "Website is starting or offline — SYED Panel"));
+    } else {
+      res.end();
+    }
+  });
+  proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error("PHP proxy timeout")));
+
+  if (bodyAlreadyParsed) {
+    proxyReq.end(bodyBuffer || Buffer.alloc(0));
+  } else {
+    req.pipe(proxyReq);
+  }
+};
+
+app.use(async (req, res, next) => {
+  const host = (req.headers.host || "").toLowerCase();
+  const match = host.match(/^([a-z0-9][a-z0-9-]*)\.syedhacker\.com$/i);
+  if (!match) return next();
+  const slug = match[1].toLowerCase();
+  if (slug === "panel" || slug === "www") return next();
+
+  if (req.path.startsWith("/api")) {
+    return res.status(404).type("text/plain").send("Not found");
+  }
+
+  try {
+    const servers = await loadWebsiteServers();
+    const server = servers.find((s: any) =>
+      (s.websiteSlug || "").toLowerCase() === slug &&
+      ["WEBSITE", "PHP"].includes((s.type || "").toUpperCase()) &&
+      !s.suspended
+    );
+    if (!server) {
+      return res.status(404).type("html").send(websiteBrandedPage("Site Not Found", "No website is hosted at this address. If you are the owner, check that your website is online in SYED Panel."));
+    }
+
+    if ((server.type || "").toUpperCase() === "PHP") {
+      if (server.status !== "online") {
+        return res.status(502).type("html").send(websiteBrandedPage("Website Unavailable", "Website is starting or offline — SYED Panel"));
+      }
+      return proxyToPhpServer(req, res, server);
+    }
+
+    // Static WEBSITE
+    if (server.status !== "online") {
+      return res.status(404).type("html").send(websiteBrandedPage("Site Not Found", "This website is currently offline. If you are the owner, start it from your SYED Panel."));
+    }
+    const root = path.join(SERVERS_DIR, server.id);
+    return express.static(root, { index: "index.html", fallthrough: false, dotfiles: "deny" })(req, res, () => {
+      if (!res.headersSent) {
+        res.status(404).type("html").send(websiteBrandedPage("Page Not Found", "The requested page does not exist on this website."));
+      }
+    });
+  } catch (e) {
+    return next();
+  }
+});
 
 import apiRoutes from "./src/server/routes/api.js";
 app.use("/api", apiRoutes);

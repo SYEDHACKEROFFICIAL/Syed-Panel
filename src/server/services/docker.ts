@@ -364,7 +364,10 @@ export const createServerContainer = async (serverData: any, nodeId?: string) =>
   const serverType = (serverData.type || "PAPER").toUpperCase();
   const isNode = ["NODEJS", "NODE"].includes(serverType);
   const isPython = ["PYTHON", "PYTHON3"].includes(serverType);
-  const isGenericApp = isNode || isPython;
+  const isGo = ["GOLANG", "GO"].includes(serverType);
+  const isPhp = ["PHP"].includes(serverType);
+  const isRuby = ["RUBY"].includes(serverType);
+  const isGenericApp = isNode || isPython || isGo || isPhp || isRuby;
   const isProxy = ["VELOCITY", "BUNGEECORD", "WATERFALL"].includes(serverType);
   
   const effectiveJava = serverData.javaVersion || getJavaVersionForMinecraft(serverData.version || "1.21.4", serverData.type);
@@ -387,6 +390,15 @@ export const createServerContainer = async (serverData: any, nodeId?: string) =>
     const pyVer = serverData.version || "3.11";
     shortImage = `python:${pyVer}-slim`;
     fullImage = `docker.io/library/python:${pyVer}-slim`;
+  } else if (isGo) {
+    shortImage = "golang:1.22-alpine";
+    fullImage = "docker.io/library/golang:1.22-alpine";
+  } else if (isPhp) {
+    shortImage = "php:8.3-cli";
+    fullImage = "docker.io/library/php:8.3-cli";
+  } else if (isRuby) {
+    shortImage = "ruby:3.3-alpine";
+    fullImage = "docker.io/library/ruby:3.3-alpine";
   }
   
   if (serverData.dockerImage) {
@@ -556,7 +568,13 @@ export const createServerContainer = async (serverData: any, nodeId?: string) =>
     if (isNode) {
       cmd = ["/bin/sh", "-c", serverData.startupCommand || "if [ -f package.json ]; then npm install --omit=dev && npm start; elif [ -f index.js ]; then node index.js; elif [ -f app.js ]; then node app.js; elif [ -f server.js ]; then node server.js; elif [ -f main.js ]; then node main.js; else echo 'Starting Node.js server...'; node index.js; fi"];
     } else if (isPython) {
-      cmd = ["/bin/sh", "-c", serverData.startupCommand || "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi; if [ -f main.py ]; then python3 -u main.py; elif [ -f app.py ]; then python3 -u app.py; elif [ -f bot.py ]; then python3 -u bot.py; elif [ -f index.py ]; then python3 -u index.py; elif [ -f server.py ]; then python3 -u server.py; else python3 -u main.py; fi"];
+      cmd = ["/bin/sh", "-c", serverData.startupCommand || "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi; if [ -f app.py ]; then python3 -u app.py; elif [ -f main.py ]; then python3 -u main.py; elif [ -f bot.py ]; then python3 -u bot.py; elif [ -f index.py ]; then python3 -u index.py; elif [ -f server.py ]; then python3 -u server.py; else python3 -u app.py; fi"];
+    } else if (isGo) {
+      cmd = ["/bin/sh", "-c", serverData.startupCommand || "go run ."];
+    } else if (isPhp) {
+      cmd = ["/bin/sh", "-c", serverData.startupCommand || `php -S 0.0.0.0:${serverData.port} -t /app`];
+    } else if (isRuby) {
+      cmd = ["/bin/sh", "-c", serverData.startupCommand || "ruby app.rb"];
     }
     
     if (serverData.dockerImage && serverData.dockerImage.includes('pterodactyl')) {
