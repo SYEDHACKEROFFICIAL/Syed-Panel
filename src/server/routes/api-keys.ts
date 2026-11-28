@@ -14,6 +14,7 @@ router.get("/", async (req, res) => {
     // Omit key_hash when listing
     const keysWithoutHash = apiKeys.map((key: any) => ({
       id: key.id,
+      key: key.key || null,
       label: key.label,
       scopes: key.scopes,
       created_by: key.created_by,
@@ -51,6 +52,7 @@ router.post("/", async (req, res) => {
     const newKey = {
       id: crypto.randomUUID(),
       key_hash: keyHash,
+      key: keyString,
       label: label || "Unnamed Key",
       scopes: scopes || ["*"],
       created_by: user.id,

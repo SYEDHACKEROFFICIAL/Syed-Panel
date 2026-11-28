@@ -1,7 +1,25 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { Key, Plus, Trash2, RefreshCw, Copy, Check } from "lucide-react";
+import { Key, Plus, Trash2, RefreshCw, Copy, Check, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+
+function SlideReveal({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={revealed ? "Hide API key" : "Slide to reveal API key"}
+      aria-label={revealed ? "Hide API key" : "Slide to reveal API key"}
+      className={`relative inline-flex items-center w-14 h-7 rounded-full transition-colors shrink-0 ${revealed ? "bg-theme-600" : "bg-slate-400/40"}`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow flex items-center justify-center transition-transform duration-300 ${revealed ? "translate-x-7" : "translate-x-0"}`}
+      >
+        {revealed ? <EyeOff size={13} className="text-slate-600" /> : <Eye size={13} className="text-slate-600" />}
+      </span>
+    </button>
+  );
+}
 
 export default function ApiKeysManager() {
   const [apiKeys, setApiKeys] = useState<any[]>([]);
@@ -10,6 +28,7 @@ export default function ApiKeysManager() {
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [newKeyString, setNewKeyString] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [revealedKeys, setRevealedKeys] = useState<Record<string, boolean>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -37,6 +56,7 @@ export default function ApiKeysManager() {
         scopes: ["*"] // Default full access
       });
       setNewKeyString(res.data.key);
+      setShowAddModal(false);
       fetchApiKeys();
       setNewKeyLabel("");
     } catch (e) {
@@ -119,6 +139,28 @@ export default function ApiKeysManager() {
                   <span>Created: {new Date(key.created_at).toLocaleDateString()}</span>
                   <span>Last used: {key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}</span>
                 </div>
+                {key.key ? (
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <SlideReveal
+                      revealed={!!revealedKeys[key.id]}
+                      onToggle={() => setRevealedKeys(prev => ({ ...prev, [key.id]: !prev[key.id] }))}
+                    />
+                    <code className="font-mono text-xs sm:text-sm bg-black/40 text-foreground px-2.5 py-1.5 rounded-lg break-all">
+                      {revealedKeys[key.id] ? key.key : "syed-••••••••••••••"}
+                    </code>
+                    {revealedKeys[key.id] && (
+                      <button
+                        onClick={() => copyToClipboard(key.key)}
+                        className="p-1.5 bg-theme-600/20 hover:bg-theme-600/30 text-theme-500 rounded-lg transition-colors shrink-0"
+                        title="Copy key"
+                      >
+                        {copiedKey ? <Check size={15} /> : <Copy size={15} />}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground mt-1.5">This key was created before key-saving was enabled, so it can only be seen at creation. If it is lost, delete it and generate a new one.</p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {deleteConfirmId === key.id ? (
