@@ -15,6 +15,10 @@ export const io = new SocketIOServer(httpServer, {
 });
 app.set("io", io);
 
+// GitHub data backup/restore — data-init se PEHLE restore (naye host par .data khali ho to wapas ajaye)
+import { restoreFromGithubSync, startGithubBackupLoop } from "./src/server/services/githubBackup.js";
+restoreFromGithubSync();
+
 // Initialize data folders
 const DATA_DIR = path.join(process.cwd(), ".data");
 const SERVERS_DIR = path.join(DATA_DIR, "servers");
@@ -288,6 +292,7 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`SYED Panel running on port ${PORT}`);
+    startGithubBackupLoop();
   });
 }
 
