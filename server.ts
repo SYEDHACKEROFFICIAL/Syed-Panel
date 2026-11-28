@@ -190,7 +190,7 @@ app.use(async (req, res, next) => {
   const match = host.match(/^([a-z0-9][a-z0-9-]*)\.syedhacker\.com$/i);
   if (!match) return next();
   const slug = match[1].toLowerCase();
-  if (slug === "panel" || slug === "www") return next();
+  if (slug === "panel" || slug === "www" || slug === "vm") return next();
 
   if (req.path.startsWith("/api")) {
     return res.status(404).type("text/plain").send("Not found");
